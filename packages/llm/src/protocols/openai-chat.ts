@@ -58,6 +58,7 @@ const OpenAIChatMessage = Schema.Union([
     content: Schema.NullOr(Schema.String),
     tool_calls: optionalArray(OpenAIChatAssistantToolCall),
     reasoning_content: Schema.optional(Schema.String),
+    reasoning_details: Schema.optional(Schema.String),
   }),
   Schema.Struct({ role: Schema.Literal("tool"), tool_call_id: Schema.String, content: Schema.String }),
 ]).pipe(Schema.toTaggedUnion("role"))
@@ -128,6 +129,7 @@ type OpenAIChatToolCallDelta = Schema.Schema.Type<typeof OpenAIChatToolCallDelta
 const OpenAIChatDelta = Schema.Struct({
   content: optionalNull(Schema.String),
   reasoning_content: optionalNull(Schema.String),
+  reasoning_details: optionalNull(Schema.String),
   tool_calls: optionalNull(Schema.Array(OpenAIChatToolCallDelta)),
 })
 
@@ -188,6 +190,9 @@ const lowerToolCall = (part: ToolCallPart): OpenAIChatAssistantToolCall => ({
 const openAICompatibleReasoningContent = (native: unknown) =>
   isRecord(native) && typeof native.reasoning_content === "string" ? native.reasoning_content : undefined
 
+const openAICompatibleReasoningDetails = (native: unknown) =>
+  isRecord(native) && typeof native.reasoning_details === "string" ? native.reasoning_details : undefined
+
 const lowerUserMessage = Effect.fn("OpenAIChat.lowerUserMessage")(function* (message: OpenAIChatRequestMessage) {
   const content: TextPart[] = []
   for (const part of message.content) {
@@ -220,6 +225,7 @@ const lowerAssistantMessage = Effect.fn("OpenAIChat.lowerAssistantMessage")(func
     content: content.length === 0 ? null : ProviderShared.joinText(content),
     tool_calls: toolCalls.length === 0 ? undefined : toolCalls,
     reasoning_content: openAICompatibleReasoningContent(message.native?.openaiCompatible),
+    reasoning_details: openAICompatibleReasoningDetails(message.native?.openaiCompatible),
   }
 })
 
@@ -325,8 +331,8 @@ const step = (state: ParserState, event: OpenAIChatEvent) =>
 
     let lifecycle = state.lifecycle
 
-    if (delta?.reasoning_content)
-      lifecycle = Lifecycle.reasoningDelta(lifecycle, events, "reasoning-0", delta.reasoning_content)
+    const reasoning = delta?.reasoning_content ?? delta?.reasoning_details
+    if (reasoning) lifecycle = Lifecycle.reasoningDelta(lifecycle, events, "reasoning-0", reasoning)
 
     if (delta?.content) lifecycle = Lifecycle.textDelta(lifecycle, events, "text-0", delta.content)
 

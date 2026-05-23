@@ -84,6 +84,44 @@ describe("Anthropic Messages route", () => {
     }),
   )
 
+  it.effect("lowers adaptive thinking and effort provider options", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare<AnthropicMessages.AnthropicMessagesBody>(
+        LLM.request({
+          model,
+          prompt: "Think first.",
+          providerOptions: {
+            anthropic: { thinking: { type: "adaptive", display: "summarized" }, effort: "max" },
+          },
+          cache: "none",
+        }),
+      )
+
+      expect(prepared.body.thinking).toEqual({ type: "adaptive", display: "summarized" })
+      expect(prepared.body.output_config).toEqual({ effort: "max" })
+    }),
+  )
+
+  it.effect("adds enabled thinking budget to max tokens", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare<AnthropicMessages.AnthropicMessagesBody>(
+        LLM.request({
+          model,
+          prompt: "Think first.",
+          generation: { maxTokens: 20, temperature: 0.5, topP: 0.9, topK: 40 },
+          providerOptions: { anthropic: { thinking: { type: "enabled", budgetTokens: 1024 } } },
+          cache: "none",
+        }),
+      )
+
+      expect(prepared.body.thinking).toEqual({ type: "enabled", budget_tokens: 1024 })
+      expect(prepared.body.max_tokens).toBe(1044)
+      expect(prepared.body.temperature).toBeUndefined()
+      expect(prepared.body.top_p).toBeUndefined()
+      expect(prepared.body.top_k).toBeUndefined()
+    }),
+  )
+
   // Regression: screenshot/read tool results must stay structured so base64
   // image data is not JSON-stringified into `tool_result.content`.
   it.effect("lowers image tool-result content as structured image blocks", () =>

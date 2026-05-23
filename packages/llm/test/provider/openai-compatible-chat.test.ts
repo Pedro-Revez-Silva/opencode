@@ -199,6 +199,75 @@ describe("OpenAI-compatible Chat route", () => {
     }),
   )
 
+  it.effect("passes through compatible options and prior reasoning for tool continuations", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          model,
+          providerOptions: {
+            deepseek: {
+              reasoningEffort: "max",
+              textVerbosity: "low",
+              promptCacheKey: "session_123",
+              strictJsonSchema: false,
+              enable_thinking: true,
+            },
+          },
+          messages: [
+            Message.user("Audit the site"),
+            Message.make({
+              role: "assistant",
+              native: { openaiCompatible: { reasoning_content: "I should inspect the page." } },
+              content: [ToolCallPart.make({ id: "call_1", name: "lookup", input: { query: "page" } })],
+            }),
+          ],
+        }),
+      )
+
+      expect(prepared.body).toMatchObject({
+        reasoning_effort: "max",
+        verbosity: "low",
+        promptCacheKey: "session_123",
+        enable_thinking: true,
+        messages: [
+          { role: "user", content: "Audit the site" },
+          {
+            role: "assistant",
+            reasoning_content: "I should inspect the page.",
+            tool_calls: [
+              {
+                id: "call_1",
+                function: { name: "lookup", arguments: '{"query":"page"}' },
+              },
+            ],
+          },
+        ],
+      })
+      expect(prepared.body).not.toHaveProperty("strictJsonSchema")
+    }),
+  )
+
+  it.effect("preserves reasoning_details compatible continuations", () =>
+    Effect.gen(function* () {
+      const prepared = yield* LLMClient.prepare(
+        LLM.request({
+          model,
+          messages: [
+            Message.make({
+              role: "assistant",
+              native: { openaiCompatible: { reasoning_details: "Alternative reasoning field." } },
+              content: [ToolCallPart.make({ id: "call_1", name: "lookup", input: {} })],
+            }),
+          ],
+        }),
+      )
+
+      expect(prepared.body).toMatchObject({
+        messages: [{ role: "assistant", reasoning_details: "Alternative reasoning field." }],
+      })
+    }),
+  )
+
   it.effect("posts to the configured compatible endpoint and parses text usage", () =>
     Effect.gen(function* () {
       const response = yield* LLMClient.generate(request).pipe(

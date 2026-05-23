@@ -392,8 +392,19 @@ describe("OpenAI Responses route", () => {
             openai: {
               promptCacheKey: "session_123",
               reasoningEffort: "high",
-              reasoningSummary: "auto",
-              includeEncryptedReasoning: true,
+              reasoningSummary: "detailed",
+              include: ["reasoning.encrypted_content", "message.output_text.logprobs"],
+              conversation: "conv_1",
+              maxToolCalls: 2,
+              metadata: { session: "test" },
+              parallelToolCalls: false,
+              previousResponseId: "resp_prev",
+              promptCacheRetention: "24h",
+              safetyIdentifier: "user_1",
+              serviceTier: "priority",
+              logprobs: true,
+              truncation: "disabled",
+              user: "end_user",
             },
           },
         }),
@@ -401,8 +412,21 @@ describe("OpenAI Responses route", () => {
 
       expect(prepared.body.store).toBe(false)
       expect(prepared.body.prompt_cache_key).toBe("session_123")
-      expect(prepared.body.include).toEqual(["reasoning.encrypted_content"])
-      expect(prepared.body.reasoning).toEqual({ effort: "high", summary: "auto" })
+      expect(prepared.body.include).toEqual(["reasoning.encrypted_content", "message.output_text.logprobs"])
+      expect(prepared.body.reasoning).toEqual({ effort: "high", summary: "detailed" })
+      expect(prepared.body).toMatchObject({
+        conversation: "conv_1",
+        max_tool_calls: 2,
+        metadata: { session: "test" },
+        parallel_tool_calls: false,
+        previous_response_id: "resp_prev",
+        prompt_cache_retention: "24h",
+        safety_identifier: "user_1",
+        service_tier: "priority",
+        top_logprobs: 20,
+        truncation: "disabled",
+        user: "end_user",
+      })
       expect(prepared.body.text).toEqual({ verbosity: "low" })
     }),
   )

@@ -144,9 +144,13 @@ const AnthropicToolChoice = Schema.Union([
   Schema.Struct({ type: Schema.tag("tool"), name: Schema.String }),
 ])
 
-const AnthropicThinking = Schema.Struct({
-  type: Schema.tag("enabled"),
-  budget_tokens: Schema.Number,
+const AnthropicThinking = Schema.Union([
+  Schema.Struct({ type: Schema.tag("enabled"), budget_tokens: Schema.Number }),
+  Schema.Struct({ type: Schema.tag("adaptive"), display: Schema.optional(Schema.Literals(["omitted", "summarized"])) }),
+])
+
+const AnthropicOutputConfig = Schema.Struct({
+  effort: Schema.optional(Schema.String),
 })
 
 const AnthropicBodyFields = {
@@ -162,6 +166,7 @@ const AnthropicBodyFields = {
   top_k: Schema.optional(Schema.Number),
   stop_sequences: optionalArray(Schema.String),
   thinking: Schema.optional(AnthropicThinking),
+  output_config: Schema.optional(AnthropicOutputConfig),
 }
 const AnthropicMessagesBody = Schema.Struct(AnthropicBodyFields)
 export type AnthropicMessagesBody = Schema.Schema.Type<typeof AnthropicMessagesBody>
@@ -417,7 +422,16 @@ const anthropicOptions = (request: LLMRequest) => request.providerOptions?.anthr
 
 const lowerThinking = Effect.fn("AnthropicMessages.lowerThinking")(function* (request: LLMRequest) {
   const thinking = anthropicOptions(request)?.thinking
-  if (!ProviderShared.isRecord(thinking) || thinking.type !== "enabled") return undefined
+  if (!ProviderShared.isRecord(thinking)) return undefined
+  if (thinking.type === "adaptive") {
+    const display: "omitted" | "summarized" | undefined =
+      thinking.display === "omitted" || thinking.display === "summarized" ? thinking.display : undefined
+    return {
+      type: "adaptive" as const,
+      display,
+    }
+  }
+  if (thinking.type !== "enabled") return undefined
   const budget =
     typeof thinking.budgetTokens === "number"
       ? thinking.budgetTokens
@@ -428,9 +442,16 @@ const lowerThinking = Effect.fn("AnthropicMessages.lowerThinking")(function* (re
   return { type: "enabled" as const, budget_tokens: budget }
 })
 
+const lowerOutputConfig = (request: LLMRequest) => {
+  const effort = anthropicOptions(request)?.effort
+  return typeof effort === "string" ? { effort } : undefined
+}
+
 const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (request: LLMRequest) {
   const toolChoice = request.toolChoice ? yield* lowerToolChoice(request.toolChoice) : undefined
   const generation = request.generation
+  const thinking = yield* lowerThinking(request)
+  const maxTokens = generation?.maxTokens ?? request.model.route.defaults.limits?.output ?? 4096
   // Allocate the 4-breakpoint budget in invalidation order: tools → system →
   // messages. Tools live highest in the cache hierarchy, so when callers
   // over-mark we keep their tool hints and shed the message-tail ones first.
@@ -460,12 +481,13 @@ const fromRequest = Effect.fn("AnthropicMessages.fromRequest")(function* (reques
     tools,
     tool_choice: toolChoice,
     stream: true as const,
-    max_tokens: generation?.maxTokens ?? request.model.route.defaults.limits?.output ?? 4096,
-    temperature: generation?.temperature,
-    top_p: generation?.topP,
-    top_k: generation?.topK,
+    max_tokens: thinking?.type === "enabled" ? maxTokens + thinking.budget_tokens : maxTokens,
+    temperature: thinking ? undefined : generation?.temperature,
+    top_p: thinking ? undefined : generation?.topP,
+    top_k: thinking ? undefined : generation?.topK,
     stop_sequences: generation?.stop,
-    thinking: yield* lowerThinking(request),
+    thinking,
+    output_config: lowerOutputConfig(request),
   }
 })
 
